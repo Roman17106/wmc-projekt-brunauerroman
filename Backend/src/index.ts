@@ -22,26 +22,30 @@ type MeditationRow = {
 };
 
 app.get("/api/meditations", (req, res) => {
-  const result: any[] = [];
+  const category =
+    typeof req.query.category === "string" && req.query.category.trim() !== ""
+      ? req.query.category.trim()
+      : null;
 
-  db.serialize(() => {
-    db.each(
-      "SELECT id, title, category, duration_seconds FROM meditations",
-      (err, row: MeditationRow) => {
-        if (err) {
-          res.status(500).json({ error: "DB error" });
-          return;
-        }
-        result.push({
-          id: row.id,
-          title: row.title,
-          category: row.category,
-          durationSeconds: row.duration_seconds,
-        });
-      },
-      () => {
-        res.json(result);
-      }
+  const sql = category
+    ? "SELECT id, title, category, duration_seconds FROM meditations WHERE category = ?"
+    : "SELECT id, title, category, duration_seconds FROM meditations";
+  const params = category ? [category] : [];
+
+  db.all(sql, params, (err, rows: MeditationRow[]) => {
+    if (err) {
+      console.error("DB error (get meditations):", err);
+      res.status(500).json({ error: "DB error" });
+      return;
+    }
+
+    res.json(
+      rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        category: row.category,
+        durationSeconds: row.duration_seconds,
+      }))
     );
   });
 });
@@ -79,23 +83,72 @@ app.get("/api/meditations/:id", (req: Request, res: Response) => {
 });
 
 app.post("/api/sessions", (req, res) => {
-  const { userId, meditationId, startedAt, endedAt, completed } = req.body;
+  const { userId, meditationId, durationSeconds, startedAt, endedAt, completed } = req.body;
 
-  const stmt = db.prepare(
-    "INSERT INTO sessions (user_id, meditation_id, started_at, ended_at, completed) VALUES (?, ?, ?, ?, ?)"
+  const userIdNum = Number(userId ?? 1);
+  const meditationIdNum = Number(meditationId);
+  const durationSecondsNum = Number(durationSeconds);
+  const completedInt = completed ? 1 : 0;
+
+  if (!Number.isFinite(userIdNum) || userIdNum <= 0) {
+    res.status(400).json({ error: "userId must be a valid number" });
+    return;
+  }
+
+  if (!Number.isFinite(meditationIdNum) || meditationIdNum <= 0) {
+    res.status(400).json({ error: "meditationId must be a valid number" });
+    return;
+  }
+
+  if (!Number.isFinite(durationSecondsNum) || durationSecondsNum <= 0) {
+    res.status(400).json({ error: "durationSeconds must be a positive number" });
+    return;
+  }
+
+  db.get(
+    "SELECT id FROM meditations WHERE id = ?",
+    [meditationIdNum],
+    (checkErr, meditationRow: any) => {
+      if (checkErr) {
+        console.error("DB error (check meditation):", checkErr);
+        res.status(500).json({ error: "DB error" });
+        return;
+      }
+
+      if (!meditationRow) {
+        res.status(400).json({ error: "meditationId does not exist" });
+        return;
+      }
+
+      const stmt = db.prepare(
+        "INSERT INTO sessions (user_id, meditation_id, started_at, ended_at, duration_seconds, completed) VALUES (?, ?, ?, ?, ?, ?)"
+      );
+
+      stmt.run(
+        userIdNum,
+        meditationIdNum,
+        startedAt ?? null,
+        endedAt ?? null,
+        Math.floor(durationSecondsNum),
+        completedInt,
+        (insertErr: Error | null) => {
+          if (insertErr) {
+            console.error("DB error (insert session):", insertErr);
+            res.status(500).json({ error: "DB error" });
+            return;
+          }
+
+          res.status(201).json({ saved: true });
+        }
+      );
+
+      stmt.finalize((finalizeErr) => {
+        if (finalizeErr) {
+          console.error("DB error (finalize session insert):", finalizeErr);
+        }
+      });
+    }
   );
-
-  stmt.run(
-    userId ?? 1,
-    meditationId,
-    startedAt ?? null,
-    endedAt ?? null,
-    completed ? 1 : 0
-  );
-
-  stmt.finalize();
-
-  res.status(201).json({ saved: true });
 });
 
 app.get("/api/stats", (req: Request, res: Response) => {

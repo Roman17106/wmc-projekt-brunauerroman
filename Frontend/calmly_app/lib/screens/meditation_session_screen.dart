@@ -1,8 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+import 'package:provider/provider.dart';
 
 import '../models/meditation.dart';
+import '../providers/settings_provider.dart';
+import '../providers/stats_provider.dart';
 import '../services/session_service.dart';
 
 class MeditationSessionScreen extends StatefulWidget {
@@ -24,12 +29,82 @@ class _MeditationSessionScreenState extends State<MeditationSessionScreen> {
 
   bool _isFinishing = false;
 
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _playStartSoundIfEnabled() async {
+    if (!mounted) {
+      return;
+    }
+
+    final soundEnabled = context.read<SettingsProvider>().soundEnabled;
+    if (!soundEnabled) {
+      return;
+    }
+
+    FlutterRingtonePlayer().playNotification();
+  }
+
+  Future<void> _playEndSoundIfEnabled() async {
+    if (!mounted) {
+      return;
+    }
+
+    final soundEnabled = context.read<SettingsProvider>().soundEnabled;
+    if (!soundEnabled) {
+      return;
+    }
+
+    FlutterRingtonePlayer().playAlarm();
+  }
+
+  Future<void> _vibrateStartIfEnabled() async {
+    if (!mounted) {
+      return;
+    }
+
+    final vibrationEnabled = context.read<SettingsProvider>().vibrationEnabled;
+    if (!vibrationEnabled) {
+      return;
+    }
+
+    await HapticFeedback.lightImpact();
+  }
+
+  Future<void> _vibrateEndIfEnabled() async {
+    if (!mounted) {
+      return;
+    }
+
+    final vibrationEnabled = context.read<SettingsProvider>().vibrationEnabled;
+    if (!vibrationEnabled) {
+      return;
+    }
+
+    await HapticFeedback.heavyImpact();
+  }
+
   @override
   void initState() {
     super.initState();
     _startedAt = DateTime.now();
     _remainingSeconds = widget.meditation.durationSeconds;
     _startTimer();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _playStartSoundIfEnabled();
+      _vibrateStartIfEnabled();
+      _showSnackBar('Meditation gestartet');
+    });
   }
 
   @override
@@ -62,6 +137,12 @@ class _MeditationSessionScreenState extends State<MeditationSessionScreen> {
 
     _isFinishing = true;
 
+    if (mounted) {
+      _playEndSoundIfEnabled();
+      _vibrateEndIfEnabled();
+      _showSnackBar('Meditation beendet');
+    }
+
     try {
       final endedAt = DateTime.now();
       await SessionService.postCompletedSession(
@@ -69,6 +150,11 @@ class _MeditationSessionScreenState extends State<MeditationSessionScreen> {
         startedAt: _startedAt,
         endedAt: endedAt,
       );
+
+      if (mounted) {
+        context.read<StatsProvider>().markStatsDirty();
+        _showSnackBar('Session gespeichert');
+      }
 
       if (!mounted) {
         return;
@@ -142,22 +228,35 @@ class _MeditationSessionScreenState extends State<MeditationSessionScreen> {
                     ),
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 8),
+              Text(
+                '${widget.meditation.durationMinutes} Minuten Fokuszeit',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(height: 24),
-              SizedBox(
-                width: 180,
-                height: 180,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      value: progress.clamp(0, 1),
-                      strokeWidth: 10,
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: SizedBox(
+                      width: 180,
+                      height: 180,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            value: progress.clamp(0, 1),
+                            strokeWidth: 10,
+                          ),
+                          Text(
+                            _formatTime(_remainingSeconds),
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                        ],
+                      ),
                     ),
-                    Text(
-                      _formatTime(_remainingSeconds),
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: 24),

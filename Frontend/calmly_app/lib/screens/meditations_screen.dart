@@ -1,9 +1,8 @@
  import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:provider/provider.dart';
 
 import '../models/meditation.dart';
+import '../providers/meditation_provider.dart';
 import 'meditation_detail_screen.dart';
 
 class MeditationsScreen extends StatefulWidget {
@@ -14,7 +13,7 @@ class MeditationsScreen extends StatefulWidget {
 }
 
 class _MeditationsScreenState extends State<MeditationsScreen> {
-  late final Future<List<Meditation>> _meditationsFuture;
+  bool _hasShownLoadErrorSnackBar = false;
 
   void _openMeditationDetail(Meditation meditation) {
     Navigator.push(
@@ -25,66 +24,39 @@ class _MeditationsScreenState extends State<MeditationsScreen> {
     );
   }
 
-  List<String> get _apiBaseUrls {
-    if (kIsWeb) {
-      return ['http://localhost:3000'];
-    }
-
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      // Prefer adb reverse mapping, fallback to emulator host loopback.
-      return ['http://localhost:3000', 'http://10.0.2.2:3000'];
-    }
-
-    return ['http://localhost:3000'];
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _meditationsFuture = _fetchMeditations();
-  }
-
-  Future<List<Meditation>> _fetchMeditations() async {
-    Exception? lastException;
-
-    for (final baseUrl in _apiBaseUrls) {
-      try {
-        final uri = Uri.parse('$baseUrl/api/meditations');
-        final response = await http.get(uri);
-
-        if (response.statusCode != 200) {
-          throw Exception('Fehler beim Laden der Meditationen (${response.statusCode})');
-        }
-
-        final List<dynamic> decodedJson =
-            jsonDecode(response.body) as List<dynamic>;
-        return decodedJson
-            .map((item) => Meditation.fromJson(item as Map<String, dynamic>))
-            .toList();
-      } on Exception catch (error) {
-        lastException = error;
-      }
-    }
-
-    throw lastException ?? Exception('Fehler beim Laden der Meditationen.');
-  }
-
   @override
   Widget build(BuildContext context) {
+    final meditationProvider = context.watch<MeditationProvider>();
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Meditationen'),
       ),
-      body: FutureBuilder<List<Meditation>>(
-        future: _meditationsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+      body: Builder(
+        builder: (context) {
+          if (meditationProvider.isLoading) {
             return const Center(
               child: CircularProgressIndicator(),
             );
           }
 
-          if (snapshot.hasError) {
+          if (meditationProvider.errorMessage != null) {
+            if (!_hasShownLoadErrorSnackBar) {
+              _hasShownLoadErrorSnackBar = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) {
+                  return;
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Fehler beim Laden der Daten'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              });
+            }
+
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
@@ -99,9 +71,15 @@ class _MeditationsScreenState extends State<MeditationsScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '${snapshot.error}',
+                      meditationProvider.errorMessage!,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 14),
+                    FilledButton.icon(
+                      onPressed: () => context.read<MeditationProvider>().reloadMeditations(),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Erneut versuchen'),
                     ),
                   ],
                 ),
@@ -109,67 +87,98 @@ class _MeditationsScreenState extends State<MeditationsScreen> {
             );
           }
 
-          final meditations = snapshot.data ?? <Meditation>[];
+          _hasShownLoadErrorSnackBar = false;
+
+          final meditations = meditationProvider.meditations;
 
           if (meditations.isEmpty) {
-            return const Center(
-              child: Text('Keine Meditationen verfügbar.'),
+            return Center(
+              child: FilledButton.icon(
+                onPressed: () => context.read<MeditationProvider>().reloadMeditations(),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Meditationen laden'),
+              ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: meditations.length,
-            itemBuilder: (context, index) {
-              final meditation = meditations[index];
-              final textTheme = Theme.of(context).textTheme;
+          return RefreshIndicator(
+            onRefresh: () => context.read<MeditationProvider>().reloadMeditations(),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: meditations.length,
+              itemBuilder: (context, index) {
+                final meditation = meditations[index];
+                final textTheme = Theme.of(context).textTheme;
 
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => _openMeditationDetail(meditation),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          meditation.title,
-                          style: textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => _openMeditationDetail(meditation),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  meditation.title,
+                                  style: textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: isDarkMode
+                                        ? Theme.of(context).colorScheme.onSurface
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Icon(
+                                Icons.chevron_right,
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            Chip(
-                              visualDensity: VisualDensity.compact,
-                              label: Text(meditation.category),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Nimm dir bewusst Zeit fuer diese Session.',
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
-                            Chip(
-                              visualDensity: VisualDensity.compact,
-                              label: Text('${meditation.durationMinutes} Min'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: () => _openMeditationDetail(meditation),
-                            icon: const Icon(Icons.play_arrow),
-                            label: const Text('Start'),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              Chip(
+                                visualDensity: VisualDensity.compact,
+                                label: Text(meditation.category),
+                              ),
+                              Chip(
+                                visualDensity: VisualDensity.compact,
+                                label: Text('${meditation.durationMinutes} Min'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () => _openMeditationDetail(meditation),
+                              icon: const Icon(Icons.play_arrow),
+                              label: const Text('Start'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           );
         },
       ),
