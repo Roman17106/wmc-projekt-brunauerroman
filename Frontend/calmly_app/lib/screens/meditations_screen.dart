@@ -143,7 +143,7 @@ class _MeditationsScreenState extends State<MeditationsScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Nimm dir bewusst Zeit fuer diese Session.',
+                            'Nimm dir bewusst Zeit für diese Session.',
                             style: textTheme.bodyMedium?.copyWith(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),

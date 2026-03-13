@@ -52,7 +52,7 @@ class MeditationDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 20),
                     Text(
-                      'Bereit fuer deine Session?',
+                      'Bereit für deine Session?',
                       style: textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),

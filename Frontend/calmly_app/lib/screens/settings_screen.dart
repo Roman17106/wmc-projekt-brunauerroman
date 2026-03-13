@@ -62,7 +62,7 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Waehle ein Theme fuer deine App.',
+                    'Wähle ein Theme für deine App.',
                     style: textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 14),
@@ -94,7 +94,7 @@ class SettingsScreen extends StatelessWidget {
               children: [
                 SwitchListTile.adaptive(
                   title: const Text('Sound aktiviert'),
-                  subtitle: const Text('Spiele kurze Signale waehrend der Session.'),
+                  subtitle: const Text('Spiele kurze Signale während der Session.'),
                   value: settings.soundEnabled,
                   onChanged: settings.setSoundEnabled,
                 ),
